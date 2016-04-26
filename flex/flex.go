@@ -31,11 +31,12 @@ func NewFlex() *Flex {
 	return fl
 }
 
-// ContainerDirection
+// ContainerDirection TODO
 //
 // https://www.w3.org/TR/css-flexbox-1/#flex-direction-property
 type ContainerDirection int8
 
+// Possible values of ContainerDirection.
 const (
 	Row ContainerDirection = iota
 	RowReverse
@@ -43,11 +44,12 @@ const (
 	ColumnReverse
 )
 
-// ContainerWrap
+// ContainerWrap TODO
 //
 // https://www.w3.org/TR/css-flexbox-1/#flex-wrap-property
 type ContainerWrap int8
 
+// Possible values of ContainerWrap.
 const (
 	NoWrap ContainerWrap = iota
 	Wrap
@@ -106,7 +108,7 @@ func (k *flexClass) Measure(n *widget.Node, t *widget.Theme) {
 	// hint yet as to how we should flex. So we ignore Wrap, Justify,
 	// AlignItem, AlignContent.
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if d, ok := c.LayoutData.(FlexLayoutData); ok {
+		if d, ok := c.LayoutData.(LayoutData); ok {
 			_ = d
 			panic("TODO Measure")
 		}
@@ -122,12 +124,12 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 	var children []element
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		children = append(children, element{
-			flexBaseSize: k.flexBaseSize(c),
+			flexBaseSize: float64(k.flexBaseSize(c)),
 			n:            c,
 		})
 	}
 
-	containerMainSize := k.mainSize(n.Rect.Size()) // no min/max properties to clamp
+	containerMainSize := float64(k.mainSize(n.Rect.Size())) // no min/max properties to clamp
 
 	// §9.3.5 collect children into flex lines
 	var lines []flexLine
@@ -149,7 +151,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			line.child = append(line.child, child)
 			line.mainSize += child.flexBaseSize
 
-			if d, ok := child.n.LayoutData.(FlexLayoutData); ok && d.BreakAfter {
+			if d, ok := child.n.LayoutData.(LayoutData); ok && d.BreakAfter {
 				lines = append(lines, line)
 				line = flexLine{}
 			}
@@ -173,27 +175,27 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			if grow {
 				if growFactor(child.n) == 0 || k.flexBaseSize(child.n) > mainSize {
 					child.frozen = true
-					child.mainSize = mainSize
+					child.mainSize = float64(mainSize)
 				}
 			} else {
 				if shrinkFactor(child.n) == 0 || k.flexBaseSize(child.n) < mainSize {
 					child.frozen = true
-					child.mainSize = mainSize
+					child.mainSize = float64(mainSize)
 				}
 			}
 		}
 
 		// §9.7.3 calculate initial free space
-		initFreeSpace := k.mainSize(n.Rect.Size())
+		initFreeSpace := float64(k.mainSize(n.Rect.Size()))
 		for _, child := range line.child {
 			if child.frozen {
 				initFreeSpace -= child.mainSize
 			} else {
-				initFreeSpace -= k.flexBaseSize(child.n)
+				initFreeSpace -= float64(k.flexBaseSize(child.n))
 			}
 		}
 
-		// §9.7.4
+		// §9.7.4 flex loop
 		for {
 			// Check for flexible items.
 			allFrozen := true
@@ -208,13 +210,13 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			}
 
 			// Calculate remaining free space.
-			remFreeSpace := k.mainSize(n.Rect.Size())
+			remFreeSpace := float64(k.mainSize(n.Rect.Size()))
 			unfrozenFlexFactor := 0.0
 			for _, child := range line.child {
 				if child.frozen {
 					remFreeSpace -= child.mainSize
 				} else {
-					remFreeSpace -= k.flexBaseSize(child.n)
+					remFreeSpace -= float64(k.flexBaseSize(child.n))
 					if grow {
 						unfrozenFlexFactor += growFactor(child.n)
 					} else {
@@ -223,54 +225,137 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 				}
 			}
 			if unfrozenFlexFactor < 1 {
-				p := float64(initFreeSpace) * unfrozenFlexFactor
-				if math.Abs(p) < math.Abs(float64(remFreeSpace)) {
-					remFreeSpace = int(p)
+				p := initFreeSpace * unfrozenFlexFactor
+				if math.Abs(p) < math.Abs(remFreeSpace) {
+					remFreeSpace = p
 				}
 			}
 
 			// Distribute free space proportional to flex factors.
 			if remFreeSpace != 0 {
-				for _, child := range line.child {
-					if child.frozen {
-						continue
+				if grow {
+					for _, child := range line.child {
+						if child.frozen {
+							continue
+						}
+						r := growFactor(child.n) / unfrozenFlexFactor
+						child.mainSize = float64(k.flexBaseSize(child.n)) + r*remFreeSpace
 					}
-					if grow {
-						r := float64(growFactor(child.n)) / unfrozenFlexFactor
-						child.mainSize = k.flexBaseSize(child.n) + int(r*float64(remFreeSpace))
-					} else {
-						// TODO
+				} else {
+					sumScaledShrinkFactor := 0.0
+					for _, child := range line.child {
+						if child.frozen {
+							continue
+						}
+						scaledShrinkFactor := float64(k.flexBaseSize(child.n)) * shrinkFactor(child.n)
+						sumScaledShrinkFactor += scaledShrinkFactor
+					}
+					for _, child := range line.child {
+						if child.frozen {
+							continue
+						}
+						scaledShrinkFactor := float64(k.flexBaseSize(child.n)) * shrinkFactor(child.n)
+						r := float64(scaledShrinkFactor) / sumScaledShrinkFactor
+						math.Abs(float64(remFreeSpace))
+						child.mainSize = float64(k.flexBaseSize(child.n)) - r*remFreeSpace
 					}
 				}
 			}
 
-			// TODO
+			// Fix min/max violations.
+			for _, child := range line.child {
+				// TODO: we work in whole pixels but flex calculations are done in
+				// fractional pixels. Take this oppertunity to clamp us to whole
+				// pixels and make sure we sum correctly.
+
+				// TODO: we do not yet have any notion of min/max for elements
+				// other than the zero lower bound. Consider adding min/max
+				// fields to LayoutData.
+				if child.frozen {
+					continue
+				}
+				child.unclamped = child.mainSize
+				if child.mainSize < 0 {
+					child.mainSize = 0
+				}
+			}
+
+			// Freeze over-flexed items.
+			sumClampDiff := 0.0
+			for _, child := range line.child {
+				sumClampDiff += child.mainSize - child.unclamped
+			}
+			switch {
+			case sumClampDiff == 0:
+				for _, child := range line.child {
+					child.frozen = true
+				}
+			case sumClampDiff > 0:
+				for _, child := range line.child {
+					if child.mainSize > child.unclamped {
+						child.frozen = true
+					}
+				}
+			case sumClampDiff < 0:
+				for _, child := range line.child {
+					if child.mainSize < child.unclamped {
+						child.frozen = true
+					}
+				}
+			}
+		}
+
+		// §9.7.5 set main size
+		off := 0
+		for _, child := range line.child {
+			end := off + int(child.mainSize)
+			switch k.flex.Direction {
+			case Row, RowReverse:
+				child.n.Rect.Min.X = off
+				child.n.Rect.Max.X = end
+			case Column, ColumnReverse:
+				child.n.Rect.Min.Y = off
+				child.n.Rect.Max.Y = end
+			default:
+				panic(fmt.Sprint("bad direction: ", k.flex.Direction))
+			}
+			off = end
 		}
 	}
+
+	// §9.4 determine cross size
+	// TODO
+
+	// §9.5 main axis alignment
+	// TODO
+
+	// §9.6 cross axis alignment
+	// TODO
 }
 
 type element struct {
 	n            *widget.Node
-	flexBaseSize int
+	flexBaseSize float64
 	frozen       bool
-	mainSize     int
-	crossSize    int
+	unclamped    float64
+	mainSize     float64
+	crossSize    float64
 }
 
 type flexLine struct {
-	mainSize int
+	mainSize float64
 	child    []*element
 }
 
 // flexBaseSize calculates flex base size as per §9.2.3
 func (k *flexClass) flexBaseSize(n *widget.Node) int {
 	basis := Auto
-	if d, ok := n.LayoutData.(FlexLayoutData); ok {
+	if d, ok := n.LayoutData.(LayoutData); ok {
 		basis = d.Basis
 	}
 	switch basis {
 	case Definite: // A
-		return n.LayoutData.(FlexLayoutData).BasisPx
+		return n.LayoutData.(LayoutData).BasisPx
 	case Content:
 		// TODO §9.2.3.B
 		// TODO §9.2.3.C
@@ -284,14 +369,14 @@ func (k *flexClass) flexBaseSize(n *widget.Node) int {
 }
 
 func growFactor(n *widget.Node) float64 {
-	if d, ok := n.LayoutData.(FlexLayoutData); ok {
+	if d, ok := n.LayoutData.(LayoutData); ok {
 		return d.Grow
 	}
 	return 0
 }
 
 func shrinkFactor(n *widget.Node) float64 {
-	if d, ok := n.LayoutData.(FlexLayoutData); ok && d.Shrink != nil {
+	if d, ok := n.LayoutData.(LayoutData); ok && d.Shrink != nil {
 		return *d.Shrink
 	}
 	return 1
@@ -316,9 +401,9 @@ const (
 	Definite
 )
 
-// FlexLayoutData is the Node.LayoutData type for a Flex's children.
-type FlexLayoutData struct {
-	// TODO: make factors float64?
+// LayoutData is the Node.LayoutData type for a Flex's children.
+type LayoutData struct {
+	// TODO: min/max values?
 
 	// Grow is the flex grow factor which determines how much a Node
 	// will grow relative to its siblings.
