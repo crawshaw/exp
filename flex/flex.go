@@ -7,6 +7,7 @@ package flex
 import (
 	"fmt"
 	"image"
+	"math"
 
 	"golang.org/x/exp/shiny/widget"
 )
@@ -113,49 +114,25 @@ func (k *flexClass) Measure(n *widget.Node, t *widget.Theme) {
 }
 
 func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
-	type element struct {
-		n *widget.Node
-		flexBaseSize int
-		frozen bool
-		mainSize int
-		crossSize int
-	}
-	var children []element
+	// Elements do not have margins and padding, so that leads to
+	// some simplifications:
+	//	inner size == outer size
+	//	whole pixel sizes
 
+	var children []element
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		var flexBaseSize int // §9.2.3
-		basis := Auto
-		if d, ok := c.LayoutData.(FlexLayoutData); ok {
-			basis = d.Basis
-		}
-		switch basis {
-		case Definite: // A
-			flexBaseSize = c.LayoutData.(FlexLayoutData).BasisPx // A
-		case Content:
-			// TODO §9.2.3.B
-			// TODO §9.2.3.C
-			// TODO §9.2.3.D
-			panic("flex-basis: content not supported")
-		case Auto: // E
-			flexBaseSize = k.mainSize(c.MeasuredSize)
-		}
 		children = append(children, element{
-			flexBaseSize: flexBaseSize,
-			n: c,
+			flexBaseSize: k.flexBaseSize(c),
+			n:            c,
 		})
 	}
 
-	flexBaseSize := k.mainSize(n.Rect.Size())
-	hypotheticalMainSize := flexBaseSize // no min/max properties to clamp
+	containerMainSize := k.mainSize(n.Rect.Size()) // no min/max properties to clamp
 
 	// §9.3.5 collect children into flex lines
-	type flexLine struct {
-		mainSize   int // TODO move out?
-		child      []*element
-	}
 	var lines []flexLine
 	if k.flex.Wrap == NoWrap {
-		line := flexLine{ child: make([]*element, len(children)) }
+		line := flexLine{child: make([]*element, len(children))}
 		for i := range children {
 			line.child[i] = &children[i]
 		}
@@ -165,7 +142,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 
 		for i := range children {
 			child := &children[i]
-			if line.mainSize > 0 && line.mainSize+child.flexBaseSize > hypotheticalMainSize {
+			if line.mainSize > 0 && line.mainSize+child.flexBaseSize > containerMainSize {
 				lines = append(lines, line)
 				line = flexLine{}
 			}
@@ -188,40 +165,132 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 	// §9.3.6 resolve flexible lengths (details in section §9.7)
 	for lineNum := range lines {
 		line := &lines[lineNum]
-		grow := line.mainSize < hypotheticalMainSize // §9.7.1
+		grow := line.mainSize < containerMainSize // §9.7.1
 
 		// §9.7.2 freeze inflexible children.
 		for _, child := range line.child {
 			mainSize := k.mainSize(child.n.MeasuredSize)
 			if grow {
-				if growFactor(child.n) == 0 || baseSize(child.n) > mainSize {
+				if growFactor(child.n) == 0 || k.flexBaseSize(child.n) > mainSize {
 					child.frozen = true
 					child.mainSize = mainSize
 				}
 			} else {
-				if shrinkFactor(child.n) == 0 || baseSize(child.n) < mainSize {
+				if shrinkFactor(child.n) == 0 || k.flexBaseSize(child.n) < mainSize {
 					child.frozen = true
 					child.mainSize = mainSize
 				}
 			}
 		}
+
+		// §9.7.3 calculate initial free space
+		initFreeSpace := k.mainSize(n.Rect.Size())
+		for _, child := range line.child {
+			if child.frozen {
+				initFreeSpace -= child.mainSize
+			} else {
+				initFreeSpace -= k.flexBaseSize(child.n)
+			}
+		}
+
+		// §9.7.4
+		for {
+			// Check for flexible items.
+			allFrozen := true
+			for _, child := range line.child {
+				if !child.frozen {
+					allFrozen = false
+					break
+				}
+			}
+			if allFrozen {
+				break
+			}
+
+			// Calculate remaining free space.
+			remFreeSpace := k.mainSize(n.Rect.Size())
+			unfrozenFlexFactor := 0.0
+			for _, child := range line.child {
+				if child.frozen {
+					remFreeSpace -= child.mainSize
+				} else {
+					remFreeSpace -= k.flexBaseSize(child.n)
+					if grow {
+						unfrozenFlexFactor += growFactor(child.n)
+					} else {
+						unfrozenFlexFactor += shrinkFactor(child.n)
+					}
+				}
+			}
+			if unfrozenFlexFactor < 1 {
+				p := float64(initFreeSpace) * unfrozenFlexFactor
+				if math.Abs(p) < math.Abs(float64(remFreeSpace)) {
+					remFreeSpace = int(p)
+				}
+			}
+
+			// Distribute free space proportional to flex factors.
+			if remFreeSpace != 0 {
+				for _, child := range line.child {
+					if child.frozen {
+						continue
+					}
+					if grow {
+						r := float64(growFactor(child.n)) / unfrozenFlexFactor
+						child.mainSize = k.flexBaseSize(child.n) + int(r*float64(remFreeSpace))
+					} else {
+						// TODO
+					}
+				}
+			}
+
+			// TODO
+		}
 	}
 }
 
-// TODO methods on element?
-
-func baseSize(n *widget.Node) int {
-	panic("TODO")
+type element struct {
+	n            *widget.Node
+	flexBaseSize int
+	frozen       bool
+	mainSize     int
+	crossSize    int
 }
 
-func growFactor(n *widget.Node) int {
+type flexLine struct {
+	mainSize int
+	child    []*element
+}
+
+// flexBaseSize calculates flex base size as per §9.2.3
+func (k *flexClass) flexBaseSize(n *widget.Node) int {
+	basis := Auto
+	if d, ok := n.LayoutData.(FlexLayoutData); ok {
+		basis = d.Basis
+	}
+	switch basis {
+	case Definite: // A
+		return n.LayoutData.(FlexLayoutData).BasisPx
+	case Content:
+		// TODO §9.2.3.B
+		// TODO §9.2.3.C
+		// TODO §9.2.3.D
+		panic("flex-basis: content not supported")
+	case Auto: // E
+		return k.mainSize(n.MeasuredSize)
+	default:
+		panic(fmt.Sprintf("unknown flex-basis %v", basis))
+	}
+}
+
+func growFactor(n *widget.Node) float64 {
 	if d, ok := n.LayoutData.(FlexLayoutData); ok {
 		return d.Grow
 	}
 	return 0
 }
 
-func shrinkFactor(n *widget.Node) int {
+func shrinkFactor(n *widget.Node) float64 {
 	if d, ok := n.LayoutData.(FlexLayoutData); ok && d.Shrink != nil {
 		return *d.Shrink
 	}
@@ -249,14 +318,16 @@ const (
 
 // FlexLayoutData is the Node.LayoutData type for a Flex's children.
 type FlexLayoutData struct {
+	// TODO: make factors float64?
+
 	// Grow is the flex grow factor which determines how much a Node
 	// will grow relative to its siblings.
-	Grow int
+	Grow float64
 
 	// Shrink is the flex shrink factor which determines how much a Node
 	// will shrink relative to its siblings. If nil, a default shrink
 	// factor of 1 is used.
-	Shrink *int
+	Shrink *float64
 
 	// Basis determines the initial main size of the of the Node.
 	// If set to Definite, the value stored in BasisPx is used.
