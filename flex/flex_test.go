@@ -41,6 +41,18 @@ var layoutTests = []layoutTest{
 			{image.Pt(200, 0), image.Pt(300, 100)},
 		},
 	},
+	{
+		size:     image.Point{300, 100},
+		measured: [][2]float64{{100, 100}, {100, 100}},
+		want: []image.Rectangle{
+			{image.Pt(0, 0), image.Pt(100, 100)},
+			{image.Pt(100, 0), image.Pt(300, 100)},
+		},
+		layoutData: []LayoutData{
+			{},
+			{Grow: 1},
+		},
+	},
 }
 
 func TestLayout(t *testing.T) {
@@ -54,6 +66,9 @@ func TestLayout(t *testing.T) {
 		var children []*widget.Node
 		for i, sz := range test.measured {
 			n := widget.NewUniform(tileColors[i], unit.Pixels(sz[0]), unit.Pixels(sz[1])).Node
+			if test.layoutData != nil {
+				n.LayoutData = test.layoutData[i]
+			}
 			fl.AppendChild(n)
 			children = append(children, n)
 		}

@@ -111,7 +111,7 @@ func (k *flexClass) Measure(n *widget.Node, t *widget.Theme) {
 		c.Class.Measure(c, t)
 		if d, ok := c.LayoutData.(LayoutData); ok {
 			_ = d
-			panic("TODO Measure")
+			fmt.Println("TODO Measure")
 		}
 	}
 }
@@ -171,6 +171,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 	for lineNum := range lines {
 		line := &lines[lineNum]
 		grow := line.mainSize < containerMainSize // §9.7.1
+		fmt.Printf("grow=%v\n", grow)
 
 		// §9.7.2 freeze inflexible children.
 		for _, child := range line.child {
@@ -179,6 +180,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 				if growFactor(child.n) == 0 || k.flexBaseSize(child.n) > mainSize {
 					child.frozen = true
 					child.mainSize = float64(mainSize)
+					fmt.Printf("frozen, mainSize=%v, growFactor=%v\n", child.mainSize, growFactor(child.n))
 				}
 			} else {
 				if shrinkFactor(child.n) == 0 || k.flexBaseSize(child.n) < mainSize {
@@ -235,6 +237,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			}
 
 			// Distribute free space proportional to flex factors.
+			fmt.Printf("remFreeSpace=%v, grow=%v, unfrozenFlexFactor=%v\n", remFreeSpace, grow, unfrozenFlexFactor)
 			if remFreeSpace != 0 {
 				if grow {
 					for _, child := range line.child {
