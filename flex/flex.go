@@ -108,6 +108,7 @@ func (k *flexClass) Measure(n *widget.Node, t *widget.Theme) {
 	// hint yet as to how we should flex. So we ignore Wrap, Justify,
 	// AlignItem, AlignContent.
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		c.Class.Measure(c, t)
 		if d, ok := c.LayoutData.(LayoutData); ok {
 			_ = d
 			panic("TODO Measure")
@@ -136,7 +137,9 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 	if k.flex.Wrap == NoWrap {
 		line := flexLine{child: make([]*element, len(children))}
 		for i := range children {
-			line.child[i] = &children[i]
+			child := &children[i]
+			line.child[i] = child
+			line.mainSize += child.flexBaseSize
 		}
 		lines = []flexLine{line}
 	} else {
@@ -256,8 +259,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 						}
 						scaledShrinkFactor := float64(k.flexBaseSize(child.n)) * shrinkFactor(child.n)
 						r := float64(scaledShrinkFactor) / sumScaledShrinkFactor
-						math.Abs(float64(remFreeSpace))
-						child.mainSize = float64(k.flexBaseSize(child.n)) - r*remFreeSpace
+						child.mainSize = float64(k.flexBaseSize(child.n)) - r*math.Abs(float64(remFreeSpace))
 					}
 				}
 			}
@@ -324,7 +326,22 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 	}
 
 	// §9.4 determine cross size
-	// TODO
+	// TODO support scaling, alignment, wrapping, etc, etc.
+	for lineNum := range lines {
+		line := &lines[lineNum]
+		for _, child := range line.child {
+			switch k.flex.Direction {
+			case Row, RowReverse:
+				child.n.Rect.Min.Y = 0
+				child.n.Rect.Max.Y = n.Rect.Size().Y
+			case Column, ColumnReverse:
+				child.n.Rect.Min.X = 0
+				child.n.Rect.Max.X = n.Rect.Size().X
+			default:
+				panic(fmt.Sprint("bad direction: ", k.flex.Direction))
+			}
+		}
+	}
 
 	// §9.5 main axis alignment
 	// TODO
