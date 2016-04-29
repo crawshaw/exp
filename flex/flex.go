@@ -56,22 +56,26 @@ const (
 	WrapReverse
 )
 
-// ContainerJustify
+// ContainerJustify aligns items along the main axis.
 //
 // https://www.w3.org/TR/css-flexbox-1/#justify-content-property
 type ContainerJustify int8
 
 const (
-	JustifyStart ContainerJustify = iota
-	JustifyEnd
-	JustifyCenter
-	JustifySpaceBetween
-	JustifySpaceAround
+	JustifyStart        ContainerJustify = iota // pack to start of line
+	JustifyEnd                                  // pack to end of line
+	JustifyCenter                               // pack to center of line
+	JustifySpaceBetween                         // even spacing
+	JustifySpaceAround                          // even spacing, half-size on each end
 )
 
-// AlignItem
+// AlignItem aligns items along the cross axis.
+//
+// It is the 'align-items' property when applied to a Flex container,
+// and the 'align-self' property when applied to an item in LayoutData.
 //
 // https://www.w3.org/TR/css-flexbox-1/#align-items-property
+// http://www.w3.org/TR/css-flexbox-1/#propdef-align-self
 type AlignItem int8
 
 const (
@@ -79,7 +83,7 @@ const (
 	AlignItemStart
 	AlignItemEnd
 	AlignItemCenter
-	AlignItemBaseline
+	AlignItemBaseline // TODO requires introducing inline-axis concept
 	AlignItemStretch
 )
 
@@ -159,6 +163,9 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 				line = flexLine{}
 			}
 		}
+		if len(line.child) > 0 {
+			lines = append(lines, line)
+		}
 
 		if k.flex.Wrap == WrapReverse {
 			for i := 0; i < len(lines)/2; i++ {
@@ -171,7 +178,6 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 	for lineNum := range lines {
 		line := &lines[lineNum]
 		grow := line.mainSize < containerMainSize // §9.7.1
-		fmt.Printf("grow=%v\n", grow)
 
 		// §9.7.2 freeze inflexible children.
 		for _, child := range line.child {
@@ -180,7 +186,6 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 				if growFactor(child.n) == 0 || k.flexBaseSize(child.n) > mainSize {
 					child.frozen = true
 					child.mainSize = float64(mainSize)
-					fmt.Printf("frozen, mainSize=%v, growFactor=%v\n", child.mainSize, growFactor(child.n))
 				}
 			} else {
 				if shrinkFactor(child.n) == 0 || k.flexBaseSize(child.n) < mainSize {
@@ -237,7 +242,6 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			}
 
 			// Distribute free space proportional to flex factors.
-			fmt.Printf("remFreeSpace=%v, grow=%v, unfrozenFlexFactor=%v\n", remFreeSpace, grow, unfrozenFlexFactor)
 			if remFreeSpace != 0 {
 				if grow {
 					for _, child := range line.child {
@@ -246,7 +250,6 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 						}
 						r := growFactor(child.n) / unfrozenFlexFactor
 						child.mainSize = float64(k.flexBaseSize(child.n)) + r*remFreeSpace
-						fmt.Printf("set child.mainSize=%v\n", child.mainSize)
 					}
 				} else {
 					sumScaledShrinkFactor := 0.0
@@ -270,7 +273,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 
 			// Fix min/max violations.
 			sumClampDiff := 0.0
-			for i, child := range line.child {
+			for _, child := range line.child {
 				// TODO: we work in whole pixels but flex calculations are done in
 				// fractional pixels. Take this oppertunity to clamp us to whole
 				// pixels and make sure we sum correctly.
@@ -293,11 +296,9 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 					child.mainSize = 0
 				}
 				sumClampDiff += child.mainSize - child.unclamped
-				fmt.Printf("\tcamp %d: unclamped=%v, mainSize=%v\n", i, child.unclamped, child.mainSize)
 			}
 
 			// Freeze over-flexed items.
-			fmt.Printf("sumClampDiff=%v\n", sumClampDiff)
 			switch {
 			case sumClampDiff == 0:
 				for _, child := range line.child {
@@ -337,9 +338,19 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 	}
 
 	// §9.4 determine cross size
-	// TODO support scaling, alignment, wrapping, etc, etc.
+	// §9.4.7 calculate hypothetical cross size of each element
+	for lineNum := range lines {
+		for _, child := range lines[lineNum].child {
+			child.crossSize = float64(k.crossSize(child.n.MeasuredSize))
+			if child.mainSize < float64(k.mainSize(child.n.MeasuredSize)) {
+				if r, ok := aspectRatio(child.n); ok {
+					child.crossSize = child.mainSize / r
+				}
+			}
+		}
+	}
 	if len(lines) == 1 {
-		// §9.4.8
+		// §9.4.8 single line
 		switch k.flex.Direction {
 		case Row, RowReverse:
 			lines[0].crossSize = float64(n.Rect.Size().Y)
@@ -347,24 +358,35 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			lines[0].crossSize = float64(n.Rect.Size().X)
 		}
 	} else {
-		// §9.4.8 otherwise
+		// §9.4.8 multi-line
 		for lineNum := range lines {
 			line := &lines[lineNum]
-			_ = line
+			// TODO §9.4.8.1, no concept of inline-axis yet
+			max := 0.0
+			for _, child := range line.child {
+				if child.crossSize > max {
+					max = child.crossSize
+				}
+			}
+			line.crossSize = max
 		}
 	}
+	// §9.4.9 align-content: stretch TODO
+	off := 0
 	for lineNum := range lines {
 		line := &lines[lineNum]
+		end := off + int(line.crossSize)
 		for _, child := range line.child {
 			switch k.flex.Direction {
 			case Row, RowReverse:
-				child.n.Rect.Min.Y = 0
-				child.n.Rect.Max.Y = int(line.crossSize)
+				child.n.Rect.Min.Y = off
+				child.n.Rect.Max.Y = end
 			case Column, ColumnReverse:
-				child.n.Rect.Min.X = 0
-				child.n.Rect.Max.X = int(line.crossSize)
+				child.n.Rect.Min.X = off
+				child.n.Rect.Max.X = end
 			}
 		}
+		off = end
 	}
 
 	// §9.5 main axis alignment
@@ -425,6 +447,7 @@ func shrinkFactor(n *widget.Node) float64 {
 }
 
 func aspectRatio(n *widget.Node) (ratio float64, ok bool) {
+	// TODO: source a formal description of "intrinsic aspect ratio"
 	d, ok := n.LayoutData.(LayoutData)
 	if ok && d.MinSize.X != 0 && d.MinSize.Y != 0 {
 		return float64(d.MinSize.X) / float64(d.MinSize.Y), true
@@ -438,6 +461,17 @@ func (k *flexClass) mainSize(p image.Point) int {
 		return p.X
 	case Column, ColumnReverse:
 		return p.Y
+	default:
+		panic(fmt.Sprint("bad direction: ", k.flex.Direction))
+	}
+}
+
+func (k *flexClass) crossSize(p image.Point) int {
+	switch k.flex.Direction {
+	case Row, RowReverse:
+		return p.Y
+	case Column, ColumnReverse:
+		return p.X
 	default:
 		panic(fmt.Sprint("bad direction: ", k.flex.Direction))
 	}

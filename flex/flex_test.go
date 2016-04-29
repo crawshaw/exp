@@ -5,6 +5,8 @@
 package flex
 
 import (
+	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"testing"
@@ -20,6 +22,73 @@ type layoutTest struct {
 	measured   [][2]float64      // MeasuredSize of child elements
 	layoutData []LayoutData      // LayoutData of child elements
 	want       []image.Rectangle // final Rect of child elements
+}
+
+func (test *layoutTest) html() string {
+	buf := new(bytes.Buffer)
+	fmt.Fprintf(buf, `<style>
+#container {
+	display: flex;
+	width:   %dpx;
+	height:  %dpx;
+`, test.size.X, test.size.Y)
+
+	switch test.direction {
+	case Row:
+	case RowReverse:
+		fmt.Fprintf(buf, "\tflex-direction: row-reverse;\n")
+	case Column:
+		fmt.Fprintf(buf, "\tflex-direction: column;\n")
+	case ColumnReverse:
+		fmt.Fprintf(buf, "\tflex-direction: column-reverse;\n")
+	}
+	switch test.wrap {
+	case NoWrap:
+	case Wrap:
+		fmt.Fprintf(buf, "\tflex-wrap: wrap;\n")
+	case WrapReverse:
+		fmt.Fprintf(buf, "\tflex-wrap: wrap-reverse;\n")
+	}
+	fmt.Fprintf(buf, "}\n")
+
+	for i, m := range test.measured {
+		fmt.Fprintf(buf, `#child%d {
+	width: %.2fpx;
+	height: %.2fpx;
+`, i, m[0], m[1])
+		c := tileColors[i]
+		fmt.Fprintf(buf, "\tbackground-color: rgb(%d, %d, %d);\n", c.R, c.G, c.B)
+		if test.layoutData != nil {
+			d := test.layoutData[i]
+			if d.MinSize.X != 0 {
+				fmt.Fprintf(buf, "\tmin-width: %dpx;\n", d.MinSize.X)
+			}
+			if d.MinSize.Y != 0 {
+				fmt.Fprintf(buf, "\tmin-height: %dpx;\n", d.MinSize.Y)
+			}
+			if d.MaxSize != nil {
+				fmt.Fprintf(buf, "\tmax-width: %dpx;\n", d.MaxSize.X)
+				fmt.Fprintf(buf, "\tmax-height: %dpx;\n", d.MaxSize.Y)
+			}
+			if d.Grow != 0 {
+				fmt.Fprintf(buf, "\tflex-grow: %f;\n", d.Grow)
+			}
+			if d.Shrink != nil {
+				fmt.Fprintf(buf, "\tflex-shrink: %f;\n", *d.Shrink)
+			}
+			// TODO: Basis, Align, BreakAfter
+		}
+		fmt.Fprintf(buf, "}\n")
+	}
+	fmt.Fprintf(buf, `</style>
+<div id="container">
+`)
+	for i := range test.measured {
+		fmt.Fprintf(buf, "\t<div id=\"child%d\"></div>\n", i)
+	}
+	fmt.Fprintf(buf, "</div>\n")
+
+	return buf.String()
 }
 
 var tileColors = []color.RGBA{
@@ -71,7 +140,23 @@ var layoutTests = []layoutTest{
 		layoutData: []LayoutData{
 			{MaxSize: sizeptr(30, 100), Grow: 1},
 			{MinSize: size(100, 0), Grow: 1},
-			{Grow: 4}},
+			{Grow: 4},
+		},
+	},
+	{
+		size:     image.Point{300, 200},
+		wrap:     Wrap,
+		measured: [][2]float64{{150, 100}, {160, 100}, {20, 100}},
+		want: []image.Rectangle{
+			{size(0, 0), size(30, 100)},
+			{size(0, 100), size(220, 200)},
+			{size(220, 100), size(300, 200)},
+		},
+		layoutData: []LayoutData{
+			{MaxSize: sizeptr(30, 100), Grow: 1},
+			{MinSize: size(100, 0), Grow: 1},
+			{Grow: 1},
+		},
 	},
 }
 
@@ -83,8 +168,6 @@ func sizeptr(x, y int) *image.Point {
 
 func TestLayout(t *testing.T) {
 	for testNum, test := range layoutTests {
-		t.Logf("Layout testNum %d", testNum)
-
 		fl := NewFlex()
 		fl.Direction = test.direction
 		fl.Wrap = test.wrap
@@ -103,6 +186,16 @@ func TestLayout(t *testing.T) {
 		fl.Node.Rect = image.Rectangle{Max: test.size}
 		fl.Node.Class.Layout(&fl.Node, nil)
 
+		bad := false
+		for i, n := range children {
+			if n.Rect != test.want[i] {
+				bad = true
+				break
+			}
+		}
+		if bad {
+			t.Logf("Bad testNum %d:\n%s", testNum, test.html())
+		}
 		for i, n := range children {
 			if n.Rect != test.want[i] {
 				t.Errorf("\tchildren[%d].Rect=%v, want %v", i, n.Rect, test.want[i])
