@@ -270,7 +270,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 
 			// Fix min/max violations.
 			sumClampDiff := 0.0
-			for _, child := range line.child {
+			for i, child := range line.child {
 				// TODO: we work in whole pixels but flex calculations are done in
 				// fractional pixels. Take this oppertunity to clamp us to whole
 				// pixels and make sure we sum correctly.
@@ -293,6 +293,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 					child.mainSize = 0
 				}
 				sumClampDiff += child.mainSize - child.unclamped
+				fmt.Printf("\tcamp %d: unclamped=%v, mainSize=%v\n", i, child.unclamped, child.mainSize)
 			}
 
 			// Freeze over-flexed items.
