@@ -48,10 +48,17 @@ var layoutTests = []layoutTest{
 			{image.Pt(0, 0), image.Pt(100, 100)},
 			{image.Pt(100, 0), image.Pt(300, 100)},
 		},
-		layoutData: []LayoutData{
-			{},
-			{Grow: 1},
+		layoutData: []LayoutData{{}, {Grow: 1}},
+	},
+	{
+		size:     image.Point{300, 100},
+		measured: [][2]float64{{50, 50}, {100, 100}, {100, 100}},
+		want: []image.Rectangle{
+			{image.Pt(0, 0), image.Pt(50, 100)},
+			{image.Pt(50, 0), image.Pt(175, 100)},
+			{image.Pt(175, 0), image.Pt(300, 100)},
 		},
+		layoutData: []LayoutData{{}, {Grow: 1}, {Grow: 1}},
 	},
 }
 

@@ -246,6 +246,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 						}
 						r := growFactor(child.n) / unfrozenFlexFactor
 						child.mainSize = float64(k.flexBaseSize(child.n)) + r*remFreeSpace
+						fmt.Printf("set child.mainSize=%v\n", child.mainSize)
 					}
 				} else {
 					sumScaledShrinkFactor := 0.0
@@ -268,28 +269,34 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			}
 
 			// Fix min/max violations.
+			sumClampDiff := 0.0
 			for _, child := range line.child {
 				// TODO: we work in whole pixels but flex calculations are done in
 				// fractional pixels. Take this oppertunity to clamp us to whole
 				// pixels and make sure we sum correctly.
-
-				// TODO: we do not yet have any notion of min/max for elements
-				// other than the zero lower bound. Consider adding min/max
-				// fields to LayoutData.
 				if child.frozen {
 					continue
 				}
 				child.unclamped = child.mainSize
+				if d, ok := child.n.LayoutData.(LayoutData); ok {
+					minSize := float64(k.mainSize(d.MinSize))
+					if minSize > child.mainSize {
+						child.mainSize = minSize
+					} else if d.MaxSize != nil {
+						maxSize := float64(k.mainSize(*d.MaxSize))
+						if child.mainSize > maxSize {
+							child.mainSize = maxSize
+						}
+					}
+				}
 				if child.mainSize < 0 {
 					child.mainSize = 0
 				}
+				sumClampDiff += child.mainSize - child.unclamped
 			}
 
 			// Freeze over-flexed items.
-			sumClampDiff := 0.0
-			for _, child := range line.child {
-				sumClampDiff += child.mainSize - child.unclamped
-			}
+			fmt.Printf("sumClampDiff=%v\n", sumClampDiff)
 			switch {
 			case sumClampDiff == 0:
 				for _, child := range line.child {
@@ -330,18 +337,31 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 
 	// §9.4 determine cross size
 	// TODO support scaling, alignment, wrapping, etc, etc.
+	if len(lines) == 1 {
+		// §9.4.8
+		switch k.flex.Direction {
+		case Row, RowReverse:
+			lines[0].crossSize = float64(n.Rect.Size().Y)
+		case Column, ColumnReverse:
+			lines[0].crossSize = float64(n.Rect.Size().X)
+		}
+	} else {
+		// §9.4.8 otherwise
+		for lineNum := range lines {
+			line := &lines[lineNum]
+			_ = line
+		}
+	}
 	for lineNum := range lines {
 		line := &lines[lineNum]
 		for _, child := range line.child {
 			switch k.flex.Direction {
 			case Row, RowReverse:
 				child.n.Rect.Min.Y = 0
-				child.n.Rect.Max.Y = n.Rect.Size().Y
+				child.n.Rect.Max.Y = int(line.crossSize)
 			case Column, ColumnReverse:
 				child.n.Rect.Min.X = 0
-				child.n.Rect.Max.X = n.Rect.Size().X
-			default:
-				panic(fmt.Sprint("bad direction: ", k.flex.Direction))
+				child.n.Rect.Max.X = int(line.crossSize)
 			}
 		}
 	}
@@ -363,8 +383,9 @@ type element struct {
 }
 
 type flexLine struct {
-	mainSize float64
-	child    []*element
+	mainSize  float64
+	crossSize float64
+	child     []*element
 }
 
 // flexBaseSize calculates flex base size as per §9.2.3
@@ -402,6 +423,14 @@ func shrinkFactor(n *widget.Node) float64 {
 	return 1
 }
 
+func aspectRatio(n *widget.Node) (ratio float64, ok bool) {
+	d, ok := n.LayoutData.(LayoutData)
+	if ok && d.MinSize.X != 0 && d.MinSize.Y != 0 {
+		return float64(d.MinSize.X) / float64(d.MinSize.Y), true
+	}
+	return 0, false
+}
+
 func (k *flexClass) mainSize(p image.Point) int {
 	switch k.flex.Direction {
 	case Row, RowReverse:
@@ -423,7 +452,8 @@ const (
 
 // LayoutData is the Node.LayoutData type for a Flex's children.
 type LayoutData struct {
-	// TODO: min/max values?
+	MinSize image.Point
+	MaxSize *image.Point
 
 	// Grow is the flex grow factor which determines how much a Node
 	// will grow relative to its siblings.
@@ -437,7 +467,7 @@ type LayoutData struct {
 	// Basis determines the initial main size of the of the Node.
 	// If set to Definite, the value stored in BasisPx is used.
 	Basis   Basis
-	BasisPx int
+	BasisPx int // TODO use unit package?
 
 	Align AlignItem
 
