@@ -123,7 +123,7 @@ var layoutTests = []layoutTest{
 		size:     image.Point{300, 100},
 		measured: [][2]float64{{50, 50}, {100, 100}, {100, 100}},
 		want: []image.Rectangle{
-			{size(0, 0), size(50, 100)},
+			{size(0, 0), size(50, 50)},
 			{size(50, 0), size(175, 100)},
 			{size(175, 0), size(300, 100)},
 		},

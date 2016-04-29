@@ -122,9 +122,9 @@ func (k *flexClass) Measure(n *widget.Node, t *widget.Theme) {
 
 func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 	// Elements do not have margins and padding, so that leads to
-	// some simplifications:
-	//	inner size == outer size
-	//	whole pixel sizes
+	// some simplifications. Inner size is equivalent to outer size,
+	// and many steps where 'auto' margins override the flex layout
+	// algorithm have been ignored.
 
 	var children []element
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -134,7 +134,8 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 		})
 	}
 
-	containerMainSize := float64(k.mainSize(n.Rect.Size())) // no min/max properties to clamp
+	containerMainSize := float64(k.mainSize(n.Rect.Size()))
+	containerCrossSize := float64(k.crossSize(n.Rect.Size()))
 
 	// §9.3.5 collect children into flex lines
 	var lines []flexLine
@@ -320,21 +321,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 		}
 
 		// §9.7.5 set main size
-		off := 0
-		for _, child := range line.child {
-			end := off + int(child.mainSize)
-			switch k.flex.Direction {
-			case Row, RowReverse:
-				child.n.Rect.Min.X = off
-				child.n.Rect.Max.X = end
-			case Column, ColumnReverse:
-				child.n.Rect.Min.Y = off
-				child.n.Rect.Max.Y = end
-			default:
-				panic(fmt.Sprint("bad direction: ", k.flex.Direction))
-			}
-			off = end
-		}
+		// At this point, child.mainSize is right.
 	}
 
 	// §9.4 determine cross size
@@ -371,29 +358,110 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			line.crossSize = max
 		}
 	}
-	// §9.4.9 align-content: stretch TODO
-	off := 0
+	off := 0.0
 	for lineNum := range lines {
 		line := &lines[lineNum]
-		end := off + int(line.crossSize)
+		line.crossOffset = off
+		off += line.crossSize
+	}
+	// §9.4.9 align-content: stretch
+	remCrossSize := containerCrossSize - off
+	if k.flex.AlignContent == AlignContentStretch && remCrossSize > 0 {
+		add := remCrossSize / float64(len(lines))
+		for lineNum := range lines {
+			line := &lines[lineNum]
+			line.crossOffset += float64(lineNum) * add
+			line.crossSize += add
+		}
+	}
+	// Note: no equiv. to §9.4.10 "visibility: collapse".
+	// §9.4.11 align-item: stretch
+	for lineNum := range lines {
+		line := &lines[lineNum]
 		for _, child := range line.child {
-			switch k.flex.Direction {
-			case Row, RowReverse:
-				child.n.Rect.Min.Y = off
-				child.n.Rect.Max.Y = end
-			case Column, ColumnReverse:
-				child.n.Rect.Min.X = off
-				child.n.Rect.Max.X = end
+			align := AlignItemAuto
+			if d, ok := child.n.LayoutData.(LayoutData); ok {
+				align = d.Align
+			}
+			if align == AlignItemStretch && child.crossSize < line.crossSize {
+				child.crossSize = line.crossSize
 			}
 		}
-		off = end
 	}
 
 	// §9.5 main axis alignment
-	// TODO
+	for lineNum := range lines {
+		line := &lines[lineNum]
+		total := 0.0
+		for _, child := range line.child {
+			total += child.mainSize
+		}
+		remFree := containerMainSize - total
+		switch k.flex.Justify {
+		case JustifyStart:
+			off := 0.0
+			for _, child := range line.child {
+				child.mainOffset = off
+				off += child.mainSize
+			}
+		case JustifyEnd:
+			off := remFree
+			for _, child := range line.child {
+				child.mainOffset = off
+				off += child.mainSize
+			}
+		case JustifyCenter:
+			off := remFree / 2
+			for _, child := range line.child {
+				child.mainOffset = off
+				off += child.mainSize
+			}
+		case JustifySpaceBetween:
+			spacing := remFree / float64(len(line.child)-1)
+			off := 0.0
+			for i, child := range line.child {
+				if i > 0 && i < len(line.child)-1 {
+					off += spacing
+				}
+				child.mainOffset = off
+				off += child.mainSize
+			}
+		case JustifySpaceAround:
+			spacing := remFree / float64(len(line.child))
+			off := spacing / 2
+			for i, child := range line.child {
+				if i > 0 && i < len(line.child)-1 {
+					off += spacing
+				}
+				child.mainOffset = off
+				off += child.mainSize
+			}
+		}
+	}
 
 	// §9.6 cross axis alignment
 	// TODO
+
+	// Layout complete. Generate child Rect values.
+	for lineNum := range lines {
+		line := &lines[lineNum]
+		for _, child := range line.child {
+			switch k.flex.Direction {
+			case Row, RowReverse:
+				child.n.Rect.Min.X = int(child.mainOffset)
+				child.n.Rect.Max.X = int(child.mainOffset) + int(child.mainSize)
+				child.n.Rect.Min.Y = int(line.crossOffset)
+				child.n.Rect.Max.Y = int(line.crossOffset) + int(child.crossSize)
+			case Column, ColumnReverse:
+				child.n.Rect.Min.Y = int(child.mainOffset)
+				child.n.Rect.Max.Y = int(child.mainOffset) + int(child.mainSize)
+				child.n.Rect.Min.X = int(line.crossOffset)
+				child.n.Rect.Max.X = int(line.crossOffset) + int(child.crossSize)
+			default:
+				panic(fmt.Sprint("bad direction: ", k.flex.Direction))
+			}
+		}
+	}
 }
 
 type element struct {
@@ -402,13 +470,15 @@ type element struct {
 	frozen       bool
 	unclamped    float64
 	mainSize     float64
+	mainOffset   float64
 	crossSize    float64
 }
 
 type flexLine struct {
-	mainSize  float64
-	crossSize float64
-	child     []*element
+	mainSize    float64
+	crossSize   float64
+	crossOffset float64
+	child       []*element
 }
 
 // flexBaseSize calculates flex base size as per §9.2.3
