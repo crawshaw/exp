@@ -379,10 +379,7 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 	for lineNum := range lines {
 		line := &lines[lineNum]
 		for _, child := range line.child {
-			align := AlignItemAuto
-			if d, ok := child.n.LayoutData.(LayoutData); ok {
-				align = d.Align
-			}
+			align := k.alignItem(child.n)
 			if align == AlignItemStretch && child.crossSize < line.crossSize {
 				child.crossSize = line.crossSize
 			}
@@ -440,7 +437,65 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 	}
 
 	// §9.6 cross axis alignment
-	// TODO
+	// §9.6.13 no 'auto' margins
+	// §9.6.14 align items inside line, 'align-self'.
+	for lineNum := range lines {
+		line := &lines[lineNum]
+		for _, child := range line.child {
+			child.crossOffset = line.crossOffset
+			if child.crossSize == line.crossSize {
+				continue
+			}
+			diff := line.crossSize - child.crossSize
+			switch k.alignItem(child.n) {
+			case AlignItemStart:
+				// already laid out correctly
+			case AlignItemEnd:
+				child.crossOffset = line.crossOffset + diff
+			case AlignItemCenter:
+				child.crossOffset = line.crossOffset + diff/2
+			case AlignItemBaseline:
+				// TODO requires introducing inline-axis concept
+			case AlignItemStretch:
+				// handled earlier, so child.crossSize == line.crossSize
+			}
+		}
+	}
+	// §9.6.15 determine container cross size used
+	crossSize := lines[len(lines)-1].crossOffset + lines[len(lines)-1].crossSize
+	remFree := containerCrossSize - crossSize
+
+	// §9.6.16 align flex lines, 'align-content'.
+	if remFree > 0 {
+		switch k.flex.AlignContent {
+		case AlignContentStart:
+			// already laid out correctly
+		case AlignContentEnd:
+			off := remFree
+			for lineNum := range lines {
+				line := &lines[lineNum]
+				line.crossOffset += off
+				for _, child := range line.child {
+					child.crossOffset += off
+				}
+			}
+		case AlignContentCenter:
+			off := remFree / 2
+			for lineNum := range lines {
+				line := &lines[lineNum]
+				line.crossOffset += off
+				for _, child := range line.child {
+					child.crossOffset += off
+				}
+			}
+		case AlignContentSpaceBetween:
+			// TODO
+		case AlignContentSpaceAround:
+			// TODO
+		case AlignContentStretch:
+			// handled earlier, why is remFree > 0?
+		}
+	}
 
 	// Layout complete. Generate child Rect values.
 	for lineNum := range lines {
@@ -450,13 +505,13 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			case Row, RowReverse:
 				child.n.Rect.Min.X = int(child.mainOffset)
 				child.n.Rect.Max.X = int(child.mainOffset) + int(child.mainSize)
-				child.n.Rect.Min.Y = int(line.crossOffset)
-				child.n.Rect.Max.Y = int(line.crossOffset) + int(child.crossSize)
+				child.n.Rect.Min.Y = int(child.crossOffset)
+				child.n.Rect.Max.Y = int(child.crossOffset) + int(child.crossSize)
 			case Column, ColumnReverse:
 				child.n.Rect.Min.Y = int(child.mainOffset)
 				child.n.Rect.Max.Y = int(child.mainOffset) + int(child.mainSize)
-				child.n.Rect.Min.X = int(line.crossOffset)
-				child.n.Rect.Max.X = int(line.crossOffset) + int(child.crossSize)
+				child.n.Rect.Min.X = int(child.crossOffset)
+				child.n.Rect.Max.X = int(child.crossOffset) + int(child.crossSize)
 			default:
 				panic(fmt.Sprint("bad direction: ", k.flex.Direction))
 			}
@@ -472,6 +527,7 @@ type element struct {
 	mainSize     float64
 	mainOffset   float64
 	crossSize    float64
+	crossOffset  float64
 }
 
 type flexLine struct {
@@ -479,6 +535,14 @@ type flexLine struct {
 	crossSize   float64
 	crossOffset float64
 	child       []*element
+}
+
+func (k *flexClass) alignItem(n *widget.Node) AlignItem {
+	align := k.flex.AlignItem
+	if d, ok := n.LayoutData.(LayoutData); ok {
+		align = d.Align
+	}
+	return align
 }
 
 // flexBaseSize calculates flex base size as per §9.2.3
