@@ -116,6 +116,50 @@ const (
 	AlignContentSpaceAround
 )
 
+// Basis sets the base size of a flex item.
+//
+// A default basis of Auto means the flex container uses the
+// MeasuredSize of an item. Otherwise a Definite Basis will
+// override the MeasuredSize with BasisPx.
+//
+// TODO: do we (or will we )have a useful notion of Content in the
+// widget layout model that is separate from MeasuredSize? If not,
+// we could consider completely removing this concept from this
+// flex implementation.
+type Basis int8
+
+// Possible values of Basis.
+const (
+	Auto    Basis = iota
+	Content       // TODO
+	Definite
+)
+
+// LayoutData is the Node.LayoutData type for a Flex's children.
+type LayoutData struct {
+	MinSize image.Point
+	MaxSize *image.Point
+
+	// Grow is the flex grow factor which determines how much a Node
+	// will grow relative to its siblings.
+	Grow float64
+
+	// Shrink is the flex shrink factor which determines how much a Node
+	// will shrink relative to its siblings. If nil, a default shrink
+	// factor of 1 is used.
+	Shrink *float64
+
+	// Basis determines the initial main size of the of the Node.
+	// If set to Definite, the value stored in BasisPx is used.
+	Basis   Basis
+	BasisPx int // TODO use unit package?
+
+	Align AlignItem
+
+	// BreakAfter forces the next node onto the next flex line.
+	BreakAfter bool
+}
+
 type flexClass struct {
 	widget.ContainerClassEmbed
 
@@ -651,37 +695,4 @@ func (k *flexClass) crossSize(p image.Point) int {
 	default:
 		panic(fmt.Sprint("bad direction: ", k.flex.Direction))
 	}
-}
-
-type Basis int8
-
-const (
-	Auto    Basis = iota
-	Content       // TODO
-	Definite
-)
-
-// LayoutData is the Node.LayoutData type for a Flex's children.
-type LayoutData struct {
-	MinSize image.Point
-	MaxSize *image.Point
-
-	// Grow is the flex grow factor which determines how much a Node
-	// will grow relative to its siblings.
-	Grow float64
-
-	// Shrink is the flex shrink factor which determines how much a Node
-	// will shrink relative to its siblings. If nil, a default shrink
-	// factor of 1 is used.
-	Shrink *float64
-
-	// Basis determines the initial main size of the of the Node.
-	// If set to Definite, the value stored in BasisPx is used.
-	Basis   Basis
-	BasisPx int // TODO use unit package?
-
-	Align AlignItem
-
-	// BreakAfter forces the next node onto the next flex line.
-	BreakAfter bool
 }
