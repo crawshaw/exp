@@ -2,6 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package flex provides a container widget that lays out its children
+// following the CSS flexbox algorithm.
+//
+// As the shiny widget model does not provide all of the layout features
+// of CSS, the flex package diverges in several ways. There is no item
+// inline-axis, no item margins or padding to be accounted for, and the
+// container size provided by the outer widget is taken as gospel and
+// never expanded.
 package flex
 
 import (
@@ -12,16 +20,16 @@ import (
 	"golang.org/x/exp/shiny/widget"
 )
 
-// Flex is a container widget that lays out its children using the
+// Flex is a container widget that lays out its children following the
 // CSS flexbox algorithm.
 type Flex struct {
 	widget.Node
 
-	Direction    ContainerDirection
-	Wrap         ContainerWrap
-	Justify      ContainerJustify
+	Direction    Direction
+	Wrap         FlexWrap
+	Justify      Justify
 	AlignItem    AlignItem
-	AlignContent ContainerAlignContent
+	AlignContent AlignContent
 }
 
 // NewFlex returns a new Flex widget.
@@ -31,42 +39,46 @@ func NewFlex() *Flex {
 	return fl
 }
 
-// ContainerDirection TODO
+// Direction is the direction in which flex items are laid out.
 //
-// https://www.w3.org/TR/css-flexbox-1/#flex-direction-property
-type ContainerDirection int8
+// https://www.w3.org/TR/css-flexbox-1/#flex-direction-propertyy
+type Direction int8
 
-// Possible values of ContainerDirection.
+// Possible values of Direction.
 const (
-	Row ContainerDirection = iota
+	Row Direction = iota
 	RowReverse
 	Column
 	ColumnReverse
 )
 
-// ContainerWrap TODO
+// FlexWrap controls whether the container is single- or multi-line,
+// and the direction in which the lines are laid out.
 //
 // https://www.w3.org/TR/css-flexbox-1/#flex-wrap-property
-type ContainerWrap int8
+type FlexWrap int8
 
-// Possible values of ContainerWrap.
+// Possible values of FlexWrap.
 const (
-	NoWrap ContainerWrap = iota
+	NoWrap FlexWrap = iota
 	Wrap
 	WrapReverse
 )
 
-// ContainerJustify aligns items along the main axis.
+// Justify aligns items along the main axis.
+//
+// Is it the 'justify-content' property.
 //
 // https://www.w3.org/TR/css-flexbox-1/#justify-content-property
-type ContainerJustify int8
+type Justify int8
 
+// Possible values of Justify.
 const (
-	JustifyStart        ContainerJustify = iota // pack to start of line
-	JustifyEnd                                  // pack to end of line
-	JustifyCenter                               // pack to center of line
-	JustifySpaceBetween                         // even spacing
-	JustifySpaceAround                          // even spacing, half-size on each end
+	JustifyStart        Justify = iota // pack to start of line
+	JustifyEnd                         // pack to end of line
+	JustifyCenter                      // pack to center of line
+	JustifySpaceBetween                // even spacing
+	JustifySpaceAround                 // even spacing, half-size on each end
 )
 
 // AlignItem aligns items along the cross axis.
@@ -78,6 +90,7 @@ const (
 // http://www.w3.org/TR/css-flexbox-1/#propdef-align-self
 type AlignItem int8
 
+// Possible values of AlignItem.
 const (
 	AlignItemAuto AlignItem = iota
 	AlignItemStart
@@ -87,14 +100,15 @@ const (
 	AlignItemStretch
 )
 
-// ContainerAlignContent is the 'align-content' property.
+// AlignContent is the 'align-content' property.
 // It aligns container lines when there is extra space on the cross-axis.
 //
 // https://www.w3.org/TR/css-flexbox-1/#align-content-property
-type ContainerAlignContent int8
+type AlignContent int8
 
+// Possible values of AlignContent.
 const (
-	AlignContentStretch ContainerAlignContent = iota
+	AlignContentStretch AlignContent = iota
 	AlignContentStart
 	AlignContentEnd
 	AlignContentCenter
@@ -122,11 +136,6 @@ func (k *flexClass) Measure(n *widget.Node, t *widget.Theme) {
 }
 
 func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
-	// Elements do not have margins and padding, so that leads to
-	// some simplifications. Inner size is equivalent to outer size,
-	// and many steps where 'auto' margins override the flex layout
-	// algorithm have been ignored.
-
 	var children []element
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		children = append(children, element{

@@ -16,9 +16,9 @@ import (
 )
 
 type layoutTest struct {
-	direction    ContainerDirection
-	wrap         ContainerWrap
-	alignContent ContainerAlignContent
+	direction    Direction
+	wrap         FlexWrap
+	alignContent AlignContent
 	size         image.Point       // size of container
 	measured     [][2]float64      // MeasuredSize of child elements
 	layoutData   []LayoutData      // LayoutData of child elements
