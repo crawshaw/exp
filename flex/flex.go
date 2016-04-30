@@ -94,12 +94,12 @@ const (
 type ContainerAlignContent int8
 
 const (
-	AlignContentStart ContainerAlignContent = iota
+	AlignContentStretch ContainerAlignContent = iota
+	AlignContentStart
 	AlignContentEnd
 	AlignContentCenter
 	AlignContentSpaceBetween
 	AlignContentSpaceAround
-	AlignContentStretch
 )
 
 type flexClass struct {
@@ -133,14 +133,6 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			flexBaseSize: float64(k.flexBaseSize(c)),
 			n:            c,
 		})
-	}
-
-	// TODO: test
-	switch k.flex.Direction {
-	case ColumnReverse, RowReverse:
-		for i := 0; i < len(children)/2; i++ {
-			children[i], children[len(children)-i-1] = children[len(children)-i-1], children[i]
-		}
 	}
 
 	containerMainSize := float64(k.mainSize(n.Rect.Size()))
@@ -524,6 +516,17 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			}
 		case AlignContentStretch:
 			// handled earlier, why is remFree > 0?
+		}
+	}
+
+	switch k.flex.Direction {
+	case RowReverse, ColumnReverse:
+		// Invert main-start and main-end.
+		for lineNum := range lines {
+			line := &lines[lineNum]
+			for _, child := range line.child {
+				child.mainOffset = containerMainSize - child.mainOffset - child.mainSize
+			}
 		}
 	}
 

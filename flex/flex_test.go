@@ -206,6 +206,26 @@ var layoutTests = []layoutTest{
 			{MaxSize: sizeptr(5, 5)},
 		},
 	},
+	{
+		size:      image.Point{300, 60},
+		direction: ColumnReverse,
+		wrap:      Wrap,
+		measured:  [][2]float64{{25, 25}, {25, 25}, {25, 25}, {25, 25}, {25, 25}},
+		want: []image.Rectangle{
+			{size(0, 35), size(25, 60)},
+			{size(0, 0), size(25, 35)},
+			{size(100, 35), size(125, 60)},
+			{size(100, 10), size(125, 35)},
+			{size(200, 0), size(225, 60)},
+		},
+		layoutData: []LayoutData{
+			{},
+			{Grow: 1},
+			{},
+			{},
+			{Grow: 1},
+		},
+	},
 }
 
 func size(x, y int) image.Point { return image.Pt(x, y) }
