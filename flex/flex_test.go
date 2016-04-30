@@ -16,12 +16,13 @@ import (
 )
 
 type layoutTest struct {
-	direction  ContainerDirection
-	wrap       ContainerWrap
-	size       image.Point       // size of container
-	measured   [][2]float64      // MeasuredSize of child elements
-	layoutData []LayoutData      // LayoutData of child elements
-	want       []image.Rectangle // final Rect of child elements
+	direction    ContainerDirection
+	wrap         ContainerWrap
+	alignContent ContainerAlignContent
+	size         image.Point       // size of container
+	measured     [][2]float64      // MeasuredSize of child elements
+	layoutData   []LayoutData      // LayoutData of child elements
+	want         []image.Rectangle // final Rect of child elements
 }
 
 func (test *layoutTest) html() string {
@@ -48,6 +49,19 @@ func (test *layoutTest) html() string {
 		fmt.Fprintf(buf, "\tflex-wrap: wrap;\n")
 	case WrapReverse:
 		fmt.Fprintf(buf, "\tflex-wrap: wrap-reverse;\n")
+	}
+	switch test.alignContent {
+	case AlignContentStart:
+	case AlignContentEnd:
+		fmt.Fprintf(buf, "\talign-content: flex-end;\n")
+	case AlignContentCenter:
+		fmt.Fprintf(buf, "\talign-content: center;\n")
+	case AlignContentSpaceBetween:
+		fmt.Fprintf(buf, "\talign-content: space-between;\n")
+	case AlignContentSpaceAround:
+		fmt.Fprintf(buf, "\talign-content: space-around;\n")
+	case AlignContentStretch:
+		fmt.Fprintf(buf, "\talign-content: stretch;\n")
 	}
 	fmt.Fprintf(buf, "}\n")
 
@@ -86,7 +100,22 @@ func (test *layoutTest) html() string {
 	for i := range test.measured {
 		fmt.Fprintf(buf, "\t<div id=\"child%d\"></div>\n", i)
 	}
-	fmt.Fprintf(buf, "</div>\n")
+	fmt.Fprintf(buf, `</div>
+<pre id="out"></pre>
+<script>
+var out = document.getElementById("out");
+var container = document.getElementById("container");
+for (var i = 0; i < container.children.length; i++) {
+	var c = container.children[i];
+	var ctop = c.offsetTop - container.offsetTop;
+	var cleft = c.offsetLeft - container.offsetLeft;
+	var cbottom = ctop + c.offsetHeight;
+	var cright = cleft + c.offsetWidth;
+
+	out.innerHTML += "\t{size(" + cleft + ", " + ctop + "), size(" + cright + ", " + cbottom + ")},\n";
+}
+</script>
+`)
 
 	return buf.String()
 }
@@ -158,6 +187,25 @@ var layoutTests = []layoutTest{
 			{Grow: 1},
 		},
 	},
+	{
+		size:         image.Point{300, 200},
+		direction:    Column,
+		wrap:         Wrap,
+		alignContent: AlignContentSpaceBetween,
+		measured:     [][2]float64{{150, 100}, {160, 100}, {20, 100}, {300, 300}},
+		want: []image.Rectangle{
+			{size(0, 0), size(30, 100)},
+			{size(0, 100), size(160, 200)},
+			{size(218, 0), size(238, 200)},
+			{size(295, 0), size(300, 5)},
+		},
+		layoutData: []LayoutData{
+			{MaxSize: sizeptr(30, 100), Grow: 1},
+			{MinSize: size(100, 0), Grow: 1},
+			{Grow: 1},
+			{MaxSize: sizeptr(5, 5)},
+		},
+	},
 }
 
 func size(x, y int) image.Point { return image.Pt(x, y) }
@@ -171,6 +219,7 @@ func TestLayout(t *testing.T) {
 		fl := NewFlex()
 		fl.Direction = test.direction
 		fl.Wrap = test.wrap
+		fl.AlignContent = test.alignContent
 
 		var children []*widget.Node
 		for i, sz := range test.measured {
@@ -198,7 +247,7 @@ func TestLayout(t *testing.T) {
 		}
 		for i, n := range children {
 			if n.Rect != test.want[i] {
-				t.Errorf("\tchildren[%d].Rect=%v, want %v", i, n.Rect, test.want[i])
+				t.Errorf("\t[%d].Rect=%v, want %v", i, n.Rect, test.want[i])
 			}
 		}
 	}

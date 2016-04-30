@@ -87,7 +87,8 @@ const (
 	AlignItemStretch
 )
 
-// ContainerAlignContent
+// ContainerAlignContent is the 'align-content' property.
+// It aligns container lines when there is extra space on the cross-axis.
 //
 // https://www.w3.org/TR/css-flexbox-1/#align-content-property
 type ContainerAlignContent int8
@@ -115,7 +116,7 @@ func (k *flexClass) Measure(n *widget.Node, t *widget.Theme) {
 		c.Class.Measure(c, t)
 		if d, ok := c.LayoutData.(LayoutData); ok {
 			_ = d
-			fmt.Println("TODO Measure")
+			// TODO Measure
 		}
 	}
 }
@@ -132,6 +133,14 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			flexBaseSize: float64(k.flexBaseSize(c)),
 			n:            c,
 		})
+	}
+
+	// TODO: test
+	switch k.flex.Direction {
+	case ColumnReverse, RowReverse:
+		for i := 0; i < len(children)/2; i++ {
+			children[i], children[len(children)-i-1] = children[len(children)-i-1], children[i]
+		}
 	}
 
 	containerMainSize := float64(k.mainSize(n.Rect.Size()))
@@ -243,32 +252,30 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			}
 
 			// Distribute free space proportional to flex factors.
-			if remFreeSpace != 0 {
-				if grow {
-					for _, child := range line.child {
-						if child.frozen {
-							continue
-						}
-						r := growFactor(child.n) / unfrozenFlexFactor
-						child.mainSize = float64(k.flexBaseSize(child.n)) + r*remFreeSpace
+			if grow {
+				for _, child := range line.child {
+					if child.frozen {
+						continue
 					}
-				} else {
-					sumScaledShrinkFactor := 0.0
-					for _, child := range line.child {
-						if child.frozen {
-							continue
-						}
-						scaledShrinkFactor := float64(k.flexBaseSize(child.n)) * shrinkFactor(child.n)
-						sumScaledShrinkFactor += scaledShrinkFactor
+					r := growFactor(child.n) / unfrozenFlexFactor
+					child.mainSize = float64(k.flexBaseSize(child.n)) + r*remFreeSpace
+				}
+			} else {
+				sumScaledShrinkFactor := 0.0
+				for _, child := range line.child {
+					if child.frozen {
+						continue
 					}
-					for _, child := range line.child {
-						if child.frozen {
-							continue
-						}
-						scaledShrinkFactor := float64(k.flexBaseSize(child.n)) * shrinkFactor(child.n)
-						r := float64(scaledShrinkFactor) / sumScaledShrinkFactor
-						child.mainSize = float64(k.flexBaseSize(child.n)) - r*math.Abs(float64(remFreeSpace))
+					scaledShrinkFactor := float64(k.flexBaseSize(child.n)) * shrinkFactor(child.n)
+					sumScaledShrinkFactor += scaledShrinkFactor
+				}
+				for _, child := range line.child {
+					if child.frozen {
+						continue
 					}
+					scaledShrinkFactor := float64(k.flexBaseSize(child.n)) * shrinkFactor(child.n)
+					r := float64(scaledShrinkFactor) / sumScaledShrinkFactor
+					child.mainSize = float64(k.flexBaseSize(child.n)) - r*math.Abs(float64(remFreeSpace))
 				}
 			}
 
@@ -332,6 +339,17 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 			if child.mainSize < float64(k.mainSize(child.n.MeasuredSize)) {
 				if r, ok := aspectRatio(child.n); ok {
 					child.crossSize = child.mainSize / r
+				}
+			}
+			if d, ok := child.n.LayoutData.(LayoutData); ok {
+				minSize := float64(k.crossSize(d.MinSize))
+				if minSize > child.crossSize {
+					child.crossSize = minSize
+				} else if d.MaxSize != nil {
+					maxSize := float64(k.crossSize(*d.MaxSize))
+					if child.crossSize > maxSize {
+						child.crossSize = maxSize
+					}
 				}
 			}
 		}
@@ -416,22 +434,16 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 		case JustifySpaceBetween:
 			spacing := remFree / float64(len(line.child)-1)
 			off := 0.0
-			for i, child := range line.child {
-				if i > 0 && i < len(line.child)-1 {
-					off += spacing
-				}
+			for _, child := range line.child {
 				child.mainOffset = off
-				off += child.mainSize
+				off += spacing + child.mainSize
 			}
 		case JustifySpaceAround:
 			spacing := remFree / float64(len(line.child))
 			off := spacing / 2
-			for i, child := range line.child {
-				if i > 0 && i < len(line.child)-1 {
-					off += spacing
-				}
+			for _, child := range line.child {
 				child.mainOffset = off
-				off += child.mainSize
+				off += spacing + child.mainSize
 			}
 		}
 	}
@@ -489,9 +501,27 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 				}
 			}
 		case AlignContentSpaceBetween:
-			// TODO
+			spacing := remFree / float64(len(lines)-1)
+			off := 0.0
+			for lineNum := range lines {
+				line := &lines[lineNum]
+				line.crossOffset += off
+				for _, child := range line.child {
+					child.crossOffset += off
+				}
+				off += spacing
+			}
 		case AlignContentSpaceAround:
-			// TODO
+			spacing := remFree / float64(len(lines))
+			off := spacing / 2
+			for lineNum := range lines {
+				line := &lines[lineNum]
+				line.crossOffset += off
+				for _, child := range line.child {
+					child.crossOffset += off
+				}
+				off += spacing
+			}
 		case AlignContentStretch:
 			// handled earlier, why is remFree > 0?
 		}
@@ -503,15 +533,15 @@ func (k *flexClass) Layout(n *widget.Node, t *widget.Theme) {
 		for _, child := range line.child {
 			switch k.flex.Direction {
 			case Row, RowReverse:
-				child.n.Rect.Min.X = int(child.mainOffset)
-				child.n.Rect.Max.X = int(child.mainOffset) + int(child.mainSize)
-				child.n.Rect.Min.Y = int(child.crossOffset)
-				child.n.Rect.Max.Y = int(child.crossOffset) + int(child.crossSize)
+				child.n.Rect.Min.X = int(math.Ceil(child.mainOffset))
+				child.n.Rect.Max.X = int(math.Ceil(child.mainOffset + child.mainSize))
+				child.n.Rect.Min.Y = int(math.Ceil(child.crossOffset))
+				child.n.Rect.Max.Y = int(math.Ceil(child.crossOffset + child.crossSize))
 			case Column, ColumnReverse:
-				child.n.Rect.Min.Y = int(child.mainOffset)
-				child.n.Rect.Max.Y = int(child.mainOffset) + int(child.mainSize)
-				child.n.Rect.Min.X = int(child.crossOffset)
-				child.n.Rect.Max.X = int(child.crossOffset) + int(child.crossSize)
+				child.n.Rect.Min.Y = int(math.Ceil(child.mainOffset))
+				child.n.Rect.Max.Y = int(math.Ceil(child.mainOffset + child.mainSize))
+				child.n.Rect.Min.X = int(math.Ceil(child.crossOffset))
+				child.n.Rect.Max.X = int(math.Ceil(child.crossOffset + child.crossSize))
 			default:
 				panic(fmt.Sprint("bad direction: ", k.flex.Direction))
 			}
